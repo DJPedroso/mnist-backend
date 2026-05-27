@@ -63,9 +63,10 @@ def preprocess_image(img: Image.Image) -> np.ndarray:
     arr = np.array(img)
     if arr.mean() > 127:
         img = ImageOps.invert(img)
-    img = img.filter(ImageFilter.MaxFilter(3))
+    # Resize FIRST, then enhance strokes on the small image
     img = img.resize((28, 28), Image.LANCZOS)
-    img = img.filter(ImageFilter.GaussianBlur(radius=0.6))
+    img = img.filter(ImageFilter.MaxFilter(3))       # ← moved after resize
+    img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
     arr = np.array(img, dtype=np.float32) / 255.0
     return arr.reshape(1, 784)
  
