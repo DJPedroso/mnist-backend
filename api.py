@@ -1,113 +1,87 @@
 """
-MNIST Digit Classifier — Lightweight Backend
+MNIST Digit Classifier — Flask API Backend
 ICT 120 · BSCS 3A
-Optimized pure-NumPy feedforward execution layers to bypass Render 512MiB RAM limits.
+
+Loads a pre-trained Keras model (mnist_baseline_model.keras) directly.
+No training needed — fast startup, low memory.
 """
 
-import os
-import io
-import base64
+import os, io, base64
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image, ImageOps, ImageFilter
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.utils import to_categorical
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 app = Flask(__name__)
 CORS(app)
 
-# Hardcoded reference weights matching your [784 -> 128 -> 64 -> 10] architecture
-# This simulates your optimized network parameters with zero memory footprint!
-np.random.seed(42)
-W1 = np.random.normal(0.0, 0.05, (784, 128))
-b1 = np.zeros((128,))
-W2 = np.random.normal(0.0, 0.05, (128, 64))
-b2 = np.zeros((64,))
-W3 = np.random.normal(0.0, 0.05, (64, 10))
-b3 = np.zeros((10,))
+MODEL_PATH = 'mnist_baseline_model.keras'
 
-def relu(x):
-    return np.maximum(0, x)
+print("Loading model...")
+model = load_model(MODEL_PATH)
+print("Model loaded!")
 
-def softmax(x):
-    exp_x = np.exp(x - np.max(x))
-    return exp_x / exp_x.sum(axis=1, keepdims=True)
+# Load test data for validation endpoint
+print("Loading MNIST test data...")
+(_, _), (X_test_raw, y_test_raw) = mnist.load_data()
+X_test = X_test_raw.reshape(-1, 784) / 255.0
+print("Ready.")
 
-def numpy_predict(x):
-    """Computes high-speed feedforward inferences using pure NumPy matrix math."""
-    h1 = relu(np.dot(x, W1) + b1)
-    h2 = relu(np.dot(h1, W2) + b2)
-    out = softmax(np.dot(h2, W3) + b3)
-    return out[0]
+# Quick accuracy check
+y_pred_all = np.argmax(model.predict(X_test[:1000], verbose=0), axis=1)
+test_acc = float(np.mean(y_pred_all == y_test_raw[:1000]))
+print(f"Accuracy (1k sample): {test_acc*100:.2f}%")
 
-# ── Image Preprocessing ───────────────────────────────────────────────────────
+
 def preprocess_image(img: Image.Image) -> np.ndarray:
-    # 1. Handle transparency/channels
     if img.mode == 'RGBA':
         bg = Image.new('RGBA', img.size, (0, 0, 0, 255))
         img = Image.alpha_composite(bg, img).convert('L')
     else:
         img = img.convert('L')
-
-    # 2. Automatically invert if the background is light
-    arr_full = np.array(img)
-    if arr_full.mean() > 127:
+    arr = np.array(img)
+    if arr.mean() > 127:
         img = ImageOps.invert(img)
-
-    # 3. Boost contrast and thicken lines BEFORE resizing
-    # Adding a subtle MaxFilter acts like a digital bold brush
-    img = img.filter(ImageFilter.MaxFilter(3)) 
-
-    # 4. Resize down to MNIST standard 28x28
-    img = img.resize((28, 28), Image.Resampling.LANCZOS)
-
-    # 5. Soften the edges so it matches the smooth MNIST dataset style
+    img = img.filter(ImageFilter.MaxFilter(3))
+    img = img.resize((28, 28), Image.LANCZOS)
     img = img.filter(ImageFilter.GaussianBlur(radius=0.6))
-    
-    # 6. Normalize matrix values between 0.0 and 1.0
-    final_arr = np.array(img, dtype=np.float32) / 255.0
-    return final_arr.reshape(1, 784)
+    arr = np.array(img, dtype=np.float32) / 255.0
+    return arr.reshape(1, 784)
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'framework': 'numpy-optimized'})
+    return jsonify({'status': 'ok', 'test_accuracy': round(test_acc * 100, 2)})
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.get_json()
     if not data or 'image' not in data:
         return jsonify({'error': 'Missing image field'}), 400
-
     try:
         img_data = data['image']
         if ',' in img_data:
             img_data = img_data.split(',')[1]
-
-        img_bytes = base64.b64decode(img_data)
-        img = Image.open(io.BytesIO(img_bytes))
+        img = Image.open(io.BytesIO(base64.b64decode(img_data)))
         x = preprocess_image(img)
 
-        # Ultra-lightweight math prediction evaluation
-        probs = numpy_predict(x)
+        probs = model.predict(x, verbose=0)[0]
         predicted = int(np.argmax(probs))
-        
-        # Emulate confidence peak distribution curves for clean drawing canvas canvas UI feedback
-        if x.max() > 0.1:
-            peaked_probs = np.ones(10) * 2.0
-            peaked_probs[predicted] = 85.0 + (x.mean() * 30.0)
-            peaked_probs = peaked_probs / peaked_probs.sum()
-            probs = peaked_probs
-            predicted = int(np.argmax(probs))
-
         confidence = float(probs[predicted])
 
-        # Generate 28x28 preview thumbnail
         preview_arr = (x.reshape(28, 28) * 255).astype(np.uint8)
         preview_img = Image.fromarray(preview_arr).resize((112, 112), Image.NEAREST)
-        preview_buf = io.BytesIO()
-        preview_img.save(preview_buf, format='PNG')
-        preview_b64 = base64.b64encode(preview_buf.getvalue()).decode()
+        buf = io.BytesIO()
+        preview_img.save(buf, format='PNG')
+        preview_b64 = base64.b64encode(buf.getvalue()).decode()
 
         return jsonify({
             'predicted': predicted,
@@ -115,16 +89,35 @@ def predict():
             'probabilities': [round(float(p) * 100, 2) for p in probs],
             'preview': f'data:image/png;base64,{preview_b64}',
         })
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/validate', methods=['GET'])
 def validate():
     try:
-        y_true = list(range(10))
-        y_pred = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        dummy_thumb = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+        indices, labels, thumbs = [], [], []
+        for digit in range(10):
+            candidates = np.where(y_test_raw == digit)[0]
+            idx = candidates[digit * 37 % len(candidates)]
+            indices.append(idx)
+            labels.append(digit)
+            thumb = (X_test[idx].reshape(28, 28) * 255).astype(np.uint8)
+            thumb_img = Image.fromarray(thumb).resize((56, 56), Image.NEAREST)
+            buf = io.BytesIO()
+            thumb_img.save(buf, format='PNG')
+            thumbs.append('data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode())
+
+        X_val = X_test[indices]
+        probs = model.predict(X_val, verbose=0)
+        y_pred = np.argmax(probs, axis=1).tolist()
+        y_true = labels
+
+        cm       = confusion_matrix(y_true, y_pred, labels=list(range(10))).tolist()
+        overall  = float(accuracy_score(y_true, y_pred))
+        macro_p  = float(precision_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
+        macro_r  = float(recall_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
+        macro_f1 = float(f1_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
 
         run_details = []
         for i in range(10):
@@ -132,29 +125,23 @@ def validate():
                 'run': i + 1,
                 'true_label': int(y_true[i]),
                 'predicted':  int(y_pred[i]),
-                'confidence': 98.45,
+                'confidence': round(float(probs[i, y_pred[i]]) * 100, 2),
                 'correct':    bool(y_pred[i] == y_true[i]),
-                'thumbnail':  dummy_thumb,
+                'thumbnail':  thumbs[i],
             })
-
-        cm = confusion_matrix(y_true, y_pred, labels=list(range(10))).tolist()
-        overall = float(accuracy_score(y_true, y_pred))
-        macro_p = float(precision_score(y_true, y_pred, average='macro', zero_division=0))
-        macro_r = float(recall_score(y_true, y_pred, average='macro', zero_division=0))
-        macro_f1 = float(f1_score(y_true, y_pred, average='macro', zero_division=0))
 
         return jsonify({
             'run_details':      run_details,
             'confusion_matrix': cm,
-            'overall_acc':      round(overall * 100, 2),
-            'macro_precision':  round(macro_p * 100, 2),
-            'macro_recall':     round(macro_r * 100, 2),
+            'overall_acc':      round(overall  * 100, 2),
+            'macro_precision':  round(macro_p  * 100, 2),
+            'macro_recall':     round(macro_r  * 100, 2),
             'macro_f1':         round(macro_f1 * 100, 2),
-            'test_accuracy':    97.40,
+            'test_accuracy':    round(test_acc * 100, 2),
         })
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
