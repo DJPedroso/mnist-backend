@@ -20,7 +20,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import keras
 
 app = Flask(__name__)
-CORS(app)  # Allows cross-origin requests from your Vercel frontend website
+
+# This explicitly tells Render to accept requests from your Vercel frontend
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://mnist-frontend-gamma.vercel.app",
+            "http://localhost:5173",
+            "http://127.0.0.1:5500"
+        ],
+        "methods": ["POST", "GET", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 MODEL_PATH = 'mnist_baseline_model.keras'
 
@@ -41,28 +53,29 @@ else:
 
 # ── Image Preprocessing ───────────────────────────────────────────────────────
 def preprocess_image(img: Image.Image) -> np.ndarray:
-    # 1. Properly flatten alpha channel transparent layouts from web canvases
+    # 1. Flatten transparent canvas backgrounds into a clean, black backdrop
     if img.mode == 'RGBA':
-        bg = Image.new('RGBA', img.size, (255, 255, 255, 255))
+        # Create a solid black background image to composite over
+        bg = Image.new('RGBA', img.size, (0, 0, 0, 255))
         img = Image.alpha_composite(bg, img).convert('L')
     else:
         img = img.convert('L')
 
-    # 2. Downsample image to standard MNIST 28x28 pixel size cleanly
+    # 2. Downsample image to standard MNIST 28x28 pixel size cleanly using crisp lanczos sampling
     img = img.resize((28, 28), Image.Resampling.LANCZOS)
     arr = np.array(img)
     
-    # 3. Handle color inversions (Web canvas is light-bg/dark-ink -> MNIST requires black-bg/white-ink)
+    # 3. Auto-Inversion logic (If image is mostly bright background, invert to match MNIST's black background rule)
     if arr.mean() > 127:
         img = ImageOps.invert(img)
     
-    # 4. Apply a minor anti-aliasing soften filter to match human handwriting traits
+    # 4. Apply minor anti-aliasing soften filter to match original dataset distribution artifacts
     img = img.filter(ImageFilter.GaussianBlur(radius=0.4))
     
     # 5. Normalize pixel values scaling explicitly between 0.0 and 1.0
     final_arr = np.array(img, dtype=np.float32) / 255.0
 
-    # 6. Flatten to match the input layer shape expected by the MLP model
+    # 6. Flatten to match the input layer shape expected by the MLP model (1, 784)
     return final_arr.reshape(1, 784)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
