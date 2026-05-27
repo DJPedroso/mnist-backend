@@ -42,21 +42,29 @@ def numpy_predict(x):
 
 # ── Image Preprocessing ───────────────────────────────────────────────────────
 def preprocess_image(img: Image.Image) -> np.ndarray:
+    # 1. Handle transparency/channels
     if img.mode == 'RGBA':
         bg = Image.new('RGBA', img.size, (0, 0, 0, 255))
         img = Image.alpha_composite(bg, img).convert('L')
     else:
         img = img.convert('L')
 
+    # 2. Automatically invert if the background is light
     arr_full = np.array(img)
-    needs_invert = arr_full.mean() > 127
-
-    img = img.resize((28, 28), Image.Resampling.LANCZOS)
-
-    if needs_invert:
+    if arr_full.mean() > 127:
         img = ImageOps.invert(img)
 
-    img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
+    # 3. Boost contrast and thicken lines BEFORE resizing
+    # Adding a subtle MaxFilter acts like a digital bold brush
+    img = img.filter(ImageFilter.MaxFilter(3)) 
+
+    # 4. Resize down to MNIST standard 28x28
+    img = img.resize((28, 28), Image.Resampling.LANCZOS)
+
+    # 5. Soften the edges so it matches the smooth MNIST dataset style
+    img = img.filter(ImageFilter.GaussianBlur(radius=0.6))
+    
+    # 6. Normalize matrix values between 0.0 and 1.0
     final_arr = np.array(img, dtype=np.float32) / 255.0
     return final_arr.reshape(1, 784)
 
