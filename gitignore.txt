@@ -1,5 +1,8 @@
-*.keras
-*.h5
+# Allow model files to be uploaded to GitHub so Render can load them directly
+!*.keras
+!*.h5
+!*.joblib
+
 __pycache__/
 *.pyc
 .venv/
