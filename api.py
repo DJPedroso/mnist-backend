@@ -2,7 +2,7 @@
 MNIST Digit Classifier — Flask API Backend
 ICT 120 · BSCS 3A
 
-Optimized TensorFlow server using your real 'mnist_baseline_model.keras'
+Optimized Keras 3 server using your real 'mnist_baseline_model.keras'
 while respecting Render's 512MiB free-tier RAM limit.
 """
 
@@ -15,28 +15,29 @@ from flask_cors import CORS
 from PIL import Image, ImageOps, ImageFilter
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
-# Suppress heavy TensorFlow logging to save memory and clean up terminal outputs
+# Suppress heavy logging to save memory and clean up terminal outputs
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
+import keras
 
 app = Flask(__name__)
 CORS(app)  # Allows cross-origin requests from your Vercel frontend website
 
 MODEL_PATH = 'mnist_baseline_model.keras'
 
-# ── Load Real Pre-trained TensorFlow Model ───────────────────────────────────
+# ── Load Real Pre-trained Keras 3 Model ──────────────────────────────────────
 if os.path.exists(MODEL_PATH):
-    print("Loading pre-trained TensorFlow Keras model...")
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print("TensorFlow model loaded successfully from disk!")
+    print("Loading pre-trained Keras 3 model...")
+    # Native Keras 3 loader fixes the Render crash
+    model = keras.models.load_model(MODEL_PATH)
+    print("Keras 3 model loaded successfully from disk!")
 else:
     print("CRITICAL: Real model file not found! Using a temporary architecture.")
     # Safe fallback so server doesn't crash if files are mismatched during deployment
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Input(shape=(784,)),
-        tf.keras.layers.Dense(128, activation='relu'),
-        tf.keras.layers.Dense(64, activation='relu'),
-        tf.keras.layers.Dense(10, activation='softmax')
+    model = keras.models.Sequential([
+        keras.layers.Input(shape=(784,)),
+        keras.layers.Dense(128, activation='relu'),
+        keras.layers.Dense(64, activation='relu'),
+        keras.layers.Dense(10, activation='softmax')
     ])
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
@@ -69,7 +70,7 @@ def preprocess_image(img: Image.Image) -> np.ndarray:
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'framework': 'tensorflow'})
+    return jsonify({'status': 'ok', 'framework': 'keras3'})
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -133,21 +134,4 @@ def validate():
         overall = float(accuracy_score(y_true, y_pred))
         macro_p = float(precision_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
         macro_r = float(recall_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
-        macro_f1 = float(f1_score(y_true, y_pred, average='macro', zero_division=0, labels=list(range(10))))
-
-        return jsonify({
-            'run_details':      run_details,
-            'confusion_matrix': cm,
-            'overall_acc':      round(overall * 100, 2),
-            'macro_precision':  round(macro_p * 100, 2),
-            'macro_recall':     round(macro_r * 100, 2),
-            'macro_f1':         round(macro_f1 * 100, 2),
-            'test_accuracy':    97.40,  # Matches notebook baseline scores
-        })
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+        macro_f1 = float(f1_score(y_true,
