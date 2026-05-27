@@ -38,14 +38,34 @@ else:
 
 # ── Image Preprocessing ───────────────────────────────────────────────────────
 def preprocess_image(img: Image.Image) -> np.ndarray:
-    img = img.convert('L')
+    # 1. Convert to pure Grayscale and isolate the Alpha Channel if present
+    if img.mode == 'RGBA':
+        # Create a solid white background canvas
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        # Paste the image using its own alpha channel as a mask
+        bg.paste(img, mask=img.split()[3])
+        img = bg.convert('L')
+    else:
+        img = img.convert('L')
+
     arr = np.array(img)
+    
+    # 2. Strict Inversion Checklist
+    # MNIST requires a pitch-black background (0) and pure white brushstrokes (255)
     if arr.mean() > 127:
         img = ImageOps.invert(img)
-    img = img.resize((28, 28), Image.LANCZOS)
-    img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
+
+    # 3. Downsample to standard MNIST 28x28 size cleanly
+    img = img.resize((28, 28), Image.Resampling.LANCZOS)
+    
+    # 4. Anti-aliasing soften filter (helps match the soft edges of handwritten MNIST digits)
+    img = img.filter(ImageFilter.GaussianBlur(radius=0.4))
+    
+    # 5. Normalize pixel values between 0.0 and 1.0
     arr = np.array(img, dtype=np.float32) / 255.0
-    return arr.reshape(1, 784)
+
+    # 6. Transpose the matrix (.T) to align coordinate grids matching your frontend canvas
+    return arr.T.reshape(1, 784)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/health', methods=['GET'])
@@ -73,7 +93,8 @@ def predict():
         confidence = float(probs[predicted])
 
         # Generate 28x28 preview as base64 for frontend canvas validation
-        preview_arr = (x.reshape(28, 28) * 255).astype(np.uint8)
+        # We untranspose (.T) here just so your frontend preview thumbnail visually remains upright
+        preview_arr = ((x.reshape(28, 28)).T * 255).astype(np.uint8)
         preview_img = Image.fromarray(preview_arr).resize((112, 112), Image.NEAREST)
         preview_buf = io.BytesIO()
         preview_img.save(preview_buf, format='PNG')
