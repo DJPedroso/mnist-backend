@@ -8,6 +8,7 @@ No training needed — fast startup, low memory.
  
 import os, io, base64
 import numpy as np
+import gc
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image, ImageOps, ImageFilter
@@ -33,22 +34,23 @@ test_acc   = None
  
 def load_resources():
     global model, X_test, y_test_raw, test_acc
- 
+
     print("Loading model...")
     model = load_model(MODEL_PATH)
     print("Model loaded!")
- 
+
     print("Loading MNIST test data...")
     (_, _), (X_test_raw_local, y_test_raw_local) = mnist.load_data()
     X_test     = X_test_raw_local.reshape(-1, 784) / 255.0
     y_test_raw = y_test_raw_local
     print("Ready.")
- 
-    y_pred_all = np.argmax(model.predict(X_test[:1000], verbose=0), axis=1)
-    test_acc   = float(np.mean(y_pred_all == y_test_raw[:1000]))
-    print(f"Accuracy (1k sample): {test_acc*100:.2f}%")
- 
- 
+
+    # Reduce sample size from 1000 to 100
+    y_pred_all = np.argmax(model.predict(X_test[:100], verbose=0), axis=1)
+    test_acc   = float(np.mean(y_pred_all == y_test_raw[:100]))
+    print(f"Accuracy (100 sample): {test_acc*100:.2f}%")
+    gc.collect()
+
 # Load inside app context so gunicorn can bind the port before heavy work starts
 with app.app_context():
     load_resources()
