@@ -14,12 +14,9 @@ CORS(app)
 MODEL_PATH = 'mnist_sklearn_model.joblib'
 
 # Hardcoded test accuracy achieved during local training to show on health check
-# Update this to match your exact local training analysis!
 test_acc = 0.9740 
 
 # ── Load Pre-trained Scikit-Learn Model ──────────────────────────────────────
-# If the model doesn't exist yet, we train a quick mini-MLP on startup so the app doesn't crash,
-# but it's highly recommended to commit the 'mnist_sklearn_model.joblib' file directly to Git!
 if os.path.exists(MODEL_PATH):
     model = joblib.load(MODEL_PATH)
     print("Scikit-learn MLP Model loaded from disk.")
